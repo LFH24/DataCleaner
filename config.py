@@ -1,4 +1,4 @@
-"""
+﻿"""
 全局配置 — 中文文案、默认阈值、单位词库、处理器元数据
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ VIF_THRESHOLD = 10.0                     # VIF 多重共线性告警阈值
 DECIMAL_MAX = 6                          # 小数位最大值
 DECIMAL_MIN = 0                          # 小数位最小值
 DECIMAL_PERCENTILE = 90                  # 自动检测小数位百分位
-UNIT_MATCH_RATIO = 0.3                   # 单位匹配比例阈值
+UNIT_MATCH_RATIO = 0.6                   # 单位匹配比例阈值
 TYPE_DETECT_NUMERIC_RATIO = 0.9          # 类型检测数值比例
 TYPE_DETECT_DATETIME_RATIO = 0.8         # 类型检测日期比例
 CATEGORICAL_MAX_RATIO = 0.1              # 分类列最大唯一值比例

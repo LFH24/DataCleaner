@@ -15,7 +15,6 @@ from processors.base import BaseProcessor
 CN_DATE_PATTERNS = [
     (re.compile(r'(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日'), "{:04d}-{:02d}-{:02d}"),
     (re.compile(r'(\d{4})\s*年\s*(\d{1,2})\s*月'), "{:04d}-{:02d}"),
-    (re.compile(r'(\d{1,2})\s*月\s*(\d{1,2})\s*日'), "2024-{:02d}-{:02d}"),  # 假设当年
 ]
 
 # 常见数字日期格式
@@ -48,7 +47,7 @@ class DatetimeStandardizer(BaseProcessor):
             "detect_by_name": True,              # 通过列名自动检测
             "detect_by_content": True,           # 通过内容自动检测
             "use_dateutil": True,                # 使用 dateutil 解析
-            "current_year": datetime.now().year,
+            "current_year": datetime.now().year,  # 无年份日期（如 1月1日）补全年份
         }
 
     def process(self, model: DataModel) -> DataModel:
@@ -120,6 +119,9 @@ class DatetimeStandardizer(BaseProcessor):
         cn_count = 0
         for pat, _ in CN_DATE_PATTERNS:
             cn_count += sample.apply(lambda x: bool(pat.search(str(x)))).sum()
+        # 也检查无年份中文日期（如 "1月1日"）
+        no_year_pat = re.compile(r'(\d{1,2})\s*月\s*(\d{1,2})\s*日')
+        cn_count += sample.apply(lambda x: bool(no_year_pat.search(str(x)))).sum()
         if cn_count / len(sample) > 0.5:
             return True
 
@@ -135,6 +137,10 @@ class DatetimeStandardizer(BaseProcessor):
 
     def _parse_dates(self, series: pd.Series, config: dict):
         """尝试解析日期列，返回 datetime Series 或 None"""
+        current_year = config.get("current_year", datetime.now().year)
+
+        # 无年份中文日期模式（运行时构建，使用当前配置的年份）
+        no_year_date_pat = re.compile(r'(\d{1,2})\s*月\s*(\d{1,2})\s*日')
 
         def _parse(val):
             if pd.isna(val):
@@ -143,7 +149,7 @@ class DatetimeStandardizer(BaseProcessor):
             if not s:
                 return pd.NaT
 
-            # 1. 中文日期
+            # 1. 中文日期（含年份）
             for pat, out_fmt in CN_DATE_PATTERNS:
                 m = pat.search(s)
                 if m:
@@ -154,7 +160,17 @@ class DatetimeStandardizer(BaseProcessor):
                     except Exception:
                         pass
 
-            # 2. 数字日期 (20240101)
+            # 2. 中文日期（无年份，如 "1月1日"）— 使用配置的 current_year
+            m = no_year_date_pat.search(s)
+            if m:
+                try:
+                    month, day = int(m.group(1)), int(m.group(2))
+                    dt_str = f"{current_year:04d}-{month:02d}-{day:02d}"
+                    return pd.to_datetime(dt_str)
+                except Exception:
+                    pass
+
+            # 3. 数字日期 (20240101)
             for pat, out_fmt in NUM_DATE_PATTERNS:
                 m = pat.match(s)
                 if m:
@@ -165,10 +181,10 @@ class DatetimeStandardizer(BaseProcessor):
                     except Exception:
                         pass
 
-            # 3. dateutil 宽松解析
+            # 4. dateutil 宽松解析
             if config.get("use_dateutil", True):
                 try:
-                    return dateutil_parse(s, fuzzy=False, default=datetime(config["current_year"], 1, 1))
+                    return dateutil_parse(s, fuzzy=False, default=datetime(current_year, 1, 1))
                 except Exception:
                     pass
 

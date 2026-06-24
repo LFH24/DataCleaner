@@ -24,6 +24,7 @@ class Binning(BaseProcessor):
             "bins": DEFAULT_BINS,
             "labels": None,                # None=自动生成; list[str]=自定义标签
             "output_mode": "replace",      # "replace" | "new_column"
+            "kmeans_fill_strategy": "median",  # K-means 分箱前缺失值填充策略
         }
 
     def process(self, model: DataModel) -> DataModel:
@@ -59,10 +60,21 @@ class Binning(BaseProcessor):
 
                 elif method == "kmeans":
                     from sklearn.preprocessing import KBinsDiscretizer
+                    # 记录缺失值数量并填充（填充值记录到变更日志）
+                    missing_mask = df[col].isna()
+                    missing_count = missing_mask.sum()
+                    fill_val = df[col].median() if config.get("kmeans_fill_strategy") == "median" else df[col].mean()
+                    filled_col = df[col].fillna(fill_val)
+
                     kbd = KBinsDiscretizer(n_bins=n_bins, encode="ordinal", strategy="kmeans", random_state=42)
-                    binned = kbd.fit_transform(df[[col]].fillna(df[col].median())).flatten()
+                    binned = kbd.fit_transform(filled_col.to_frame()).flatten()
                     binned = pd.Series(binned, index=df.index, dtype=int)
-                    reason = f"K-means分箱 ({n_bins}箱)"
+                    # 恢复缺失值（分箱结果中对应位置也置为缺失）
+                    binned[missing_mask] = pd.NA
+                    reason = f"K-means分箱 ({n_bins}箱"
+                    if missing_count > 0:
+                        reason += f", K-means分箱前以{fill_val}填充{missing_count}个缺失值"
+                    reason += ")"
 
                 else:
                     continue

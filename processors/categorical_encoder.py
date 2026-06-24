@@ -23,7 +23,7 @@ class CategoricalEncoder(BaseProcessor):
             "method": "auto",                    # "auto" | "onehot" | "label" | "ordinal"
             "onehot_max_categories": ONEHOT_MAX_CATEGORIES,
             "ordinal_order": {},                 # {col: [ordered_values]}
-            "drop_first": False,                 # One-Hot 时丢弃虚拟变量陷阱第一列
+            "drop_first": True,                  # One-Hot 时丢弃虚拟变量陷阱第一列，避免多重共线性
         }
 
     def process(self, model: DataModel) -> DataModel:
@@ -70,7 +70,8 @@ class CategoricalEncoder(BaseProcessor):
                     df = df.drop(columns=[col])
                     changes.append(self._make_record(
                         step_name=self.label, column=col,
-                        reason=f"One-Hot编码: {unique_n}类 → {len(dummies.columns)}列",
+                        reason=f"One-Hot编码: {unique_n}类 → {len(dummies.columns)}列"
+                               f"{' (drop_first=True)' if config['drop_first'] else ''}",
                     ))
 
                 elif method == "label":

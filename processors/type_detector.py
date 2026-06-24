@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import re
 import pandas as pd
 import numpy as np
 from typing import Optional
@@ -26,6 +27,14 @@ BOOL_PATTERNS = {
     frozenset({"1", "0"}),
     frozenset({"t", "f"}),
 }
+
+# 日期关键词列名（用于判断 8 位纯数字是日期还是 ID）
+DATE_COLUMN_KEYWORDS = [
+    "日期", "时间", "date", "time", "datetime", "timestamp",
+    "创建", "修改", "更新", "注册", "生日", "出生", "入职", "离职",
+    "开始", "结束", "截止", "有效期", "created", "updated", "modified",
+    "birth", "start", "end", "deadline",
+]
 
 
 class TypeDetector(BaseProcessor):
@@ -53,7 +62,7 @@ class TypeDetector(BaseProcessor):
 
         for col in df.columns:
             series = df[col]
-            col_type = self._detect_type(series, config)
+            col_type = self._detect_type(series, col, config)
             column_types[col] = col_type
 
             if config["auto_convert"]:
@@ -72,7 +81,7 @@ class TypeDetector(BaseProcessor):
         self._add_changes(model, changes)
         return model
 
-    def _detect_type(self, series: pd.Series, config: dict) -> ColumnType:
+    def _detect_type(self, series: pd.Series, col_name: str, config: dict) -> ColumnType:
         non_null = series.dropna()
         if len(non_null) == 0:
             return ColumnType.TEXT
@@ -93,15 +102,26 @@ class TypeDetector(BaseProcessor):
 
         str_series = series.astype(str)
 
-        # 1. 尝试日期检测
-        dt = pd.to_datetime(str_series, errors="coerce", )
+        # 1. 先尝试数值检测（数值优先于日期，避免 8 位纯数字被误判为日期）
+        num = pd.to_numeric(str_series, errors="coerce")
+        num_ratio = num.notna().mean()
+
+        # 2. 尝试日期检测
+        dt = pd.to_datetime(str_series, errors="coerce")
         dt_ratio = dt.notna().mean()
+
+        # 日期和数值均通过阈值时的歧义处理：
+        # 如果列名含日期关键词 → 优先日期；否则优先数值（8位整数更可能是ID）
+        if dt_ratio >= config["datetime_threshold"] and num_ratio >= config["numeric_threshold"]:
+            col_lower = col_name.lower()
+            if any(kw in col_lower for kw in DATE_COLUMN_KEYWORDS):
+                return ColumnType.DATETIME
+            else:
+                return ColumnType.NUMERIC
+
         if dt_ratio >= config["datetime_threshold"]:
             return ColumnType.DATETIME
 
-        # 2. 尝试数值检测
-        num = pd.to_numeric(str_series, errors="coerce")
-        num_ratio = num.notna().mean()
         if num_ratio >= config["numeric_threshold"]:
             return ColumnType.NUMERIC
 
@@ -139,7 +159,7 @@ class TypeDetector(BaseProcessor):
 
         elif col_type == ColumnType.DATETIME:
             original = series.astype(str)
-            new = pd.to_datetime(series, errors="coerce", )
+            new = pd.to_datetime(series, errors="coerce")
             for i in series.index:
                 if pd.isna(new.loc[i]) and not pd.isna(series.loc[i]):
                     changes.append(self._make_record(

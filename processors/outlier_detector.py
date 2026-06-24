@@ -63,23 +63,46 @@ class OutlierDetector(BaseProcessor):
 
         # 2. 处理异常值
         if action == "flag":
-            for col in numeric_cols:
-                flag_col = f"{col}_outlier"
-                df[flag_col] = outlier_mask[col]
-                n = outlier_mask[col].sum()
-                if n > 0:
-                    changes.append(self._make_record(
-                        step_name=self.label, column=col,
-                        reason=f"标记 {n} 个异常值（新增列 {flag_col}）",
-                    ))
+            if method == "isolation_forest":
+                # IF 是多元检测，使用行级标记而非逐列标记
+                any_outlier = outlier_mask.any(axis=1)
+                df["_if_outlier"] = any_outlier
+                n = any_outlier.sum()
+                changes.append(self._make_record(
+                    step_name=self.label,
+                    reason=f"Isolation Forest 标记 {n} 个异常行（新增列 _if_outlier）",
+                ))
+            else:
+                for col in numeric_cols:
+                    flag_col = f"{col}_outlier"
+                    df[flag_col] = outlier_mask[col]
+                    n = outlier_mask[col].sum()
+                    if n > 0:
+                        changes.append(self._make_record(
+                            step_name=self.label, column=col,
+                            reason=f"标记 {n} 个异常值（新增列 {flag_col}）",
+                        ))
 
         elif action == "cap":
             for col in numeric_cols:
                 mask = outlier_mask[col]
                 if mask.any():
                     series = df[col]
-                    lower = series.quantile(0.25) - config["iqr_multiplier"] * (series.quantile(0.75) - series.quantile(0.25))
-                    upper = series.quantile(0.75) + config["iqr_multiplier"] * (series.quantile(0.75) - series.quantile(0.25))
+                    # 截断边界与检测方法保持一致
+                    if method == "zscore":
+                        mean_val = series.mean()
+                        std_val = series.std()
+                        lower = mean_val - config["zscore_threshold"] * std_val
+                        upper = mean_val + config["zscore_threshold"] * std_val
+                        bound_desc = f"Z-score (μ={mean_val:.4f}, σ={std_val:.4f})"
+                    else:
+                        # IQR 和 Isolation Forest 均使用 IQR 边界
+                        q1 = series.quantile(0.25)
+                        q3 = series.quantile(0.75)
+                        iqr = q3 - q1
+                        lower = q1 - config["iqr_multiplier"] * iqr
+                        upper = q3 + config["iqr_multiplier"] * iqr
+                        bound_desc = f"IQR (Q1={q1:.4f}, Q3={q3:.4f})"
 
                     for idx in df.index[mask]:
                         orig = df.loc[idx, col]
@@ -88,7 +111,7 @@ class OutlierDetector(BaseProcessor):
                             changes.append(self._make_record(
                                 step_name=self.label, column=col, row_index=idx,
                                 original_value=orig, new_value=capped,
-                                reason=f"截断异常值至 [{lower:.4f}, {upper:.4f}]",
+                                reason=f"截断异常值至 [{lower:.4f}, {upper:.4f}] ({bound_desc})",
                             ))
                             df.loc[idx, col] = capped
 
@@ -154,6 +177,8 @@ class OutlierDetector(BaseProcessor):
         preds = clf.fit_predict(clean)
         outlier_idx = clean.index[preds == -1]
 
+        # IF 是多元检测：一行被判定为异常时，在 mask 中标记该行所有数值列
+        # flag 模式下使用行级标记 _if_outlier 而非逐列标记
         for col in cols:
             mask.loc[outlier_idx, col] = True
 

@@ -40,9 +40,9 @@ class DecimalUnifier(BaseProcessor):
             if len(clean) == 0:
                 continue
 
-            # 跳过纯整数列（所有值的小数部分为0）
+            # 跳过纯整数列（所有值的小数部分接近0，使用容差避免浮点误差）
             try:
-                if ((clean % 1) == 0).all():
+                if np.allclose(clean % 1, 0, atol=1e-12):
                     continue
             except Exception:
                 continue

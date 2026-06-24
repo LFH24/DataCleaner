@@ -101,7 +101,7 @@ class UnitDetector(BaseProcessor):
                 unit_counter = Counter(units_found)
                 modal_unit = unit_counter.most_common(1)[0][0]
 
-                # 剥离单位
+                # 剥离单位（未匹配的值保留原值，尝试 pd.to_numeric 转换）
                 def _strip_unit(val):
                     if pd.isna(val):
                         return np.nan
@@ -117,7 +117,11 @@ class UnitDetector(BaseProcessor):
                             n1 = float(rm.group(1).replace(",", ""))
                             n2 = float(rm.group(2).replace(",", ""))
                             return (n1 + n2) / 2.0
-                    return np.nan
+                    # 未匹配的值：尝试直接转为数值，失败则保留原值
+                    try:
+                        return float(s.replace(",", ""))
+                    except (ValueError, AttributeError):
+                        return val
 
                 new_series = df[col].apply(_strip_unit)
                 df[col] = new_series

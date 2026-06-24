@@ -56,7 +56,7 @@ class MissingHandler(BaseProcessor):
             ))
 
             # 执行策略
-            if strategy == "drop_cols" or (strategy == "auto" and missing_ratio > config["drop_col_threshold"]):
+            if strategy == "drop_cols":
                 df = df.drop(columns=[col])
                 changes.append(self._make_record(
                     step_name=self.label, column=col,
